@@ -16,7 +16,7 @@ main = do
   forkIO $ forever $ do
     threadDelay 100000
     print =<< getCurrentTime
-  forM_ xs $ \x -> forkOS $ do
+  forM_ xs $ \x -> forkIO $ do
     threadDelay 1000000
     putStrLn $ "Child writing " ++ x ++ " to efd"
     eventfdUpMany efd (fromIntegral $ read  x)

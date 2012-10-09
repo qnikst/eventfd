@@ -19,5 +19,5 @@ newtype EFDFlag = EFDFlag { unEFDFlag :: CInt }
   , efdNonblock  = EFD_NONBLOCK
 }
 
-foreign import ccall "sys/eventfd.h eventfd" eventfd 
+foreign import ccall "sys/eventfd.h eventfd" c_eventfd 
   :: CUInt -> CInt -> IO CInt

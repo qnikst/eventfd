@@ -4,7 +4,7 @@
 name:                eventfd
 version:             0.1.0.0
 synopsis:            eventfd support
--- description:         
+description:         Eventfd support
 license:             MIT
 license-file:        LICENSE
 author:              Alexander Vershilov
