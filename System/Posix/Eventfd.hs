@@ -24,6 +24,7 @@
 --            pool on fd
 --      test blocking IO 
 --      create nonblocking only
+{-# LANGUAGE EmptyDataDecls #-}
 module System.Posix.Eventfd (
   EventFD
   , eventfd
