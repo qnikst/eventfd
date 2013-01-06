@@ -1,6 +1,8 @@
--- module: Control.Event.Eventfd
--- author: Alexander V Vershilov
--- licence: MIT
+-- module:        Control.Event.Eventfd
+-- author:        Alexander V Vershilov
+-- stability:     experimental
+-- porability:    unportable (ghc, linux>=2.6.30, posix)
+-- licence:       MIT
 --
 -- | this module provides functionality for handling 
 -- eventfd subsytem to send and receive events
@@ -16,99 +18,98 @@
 -- a pipe in all cases where pipe is used to simply
 -- signal events.
 --
--- This module provides extra functionality that tries to be
--- safe
---
-{-# LANGUAGE EmptyDataDecls #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module System.Posix.Eventfd (
-  -- * low level functionallity
-    eventfd
+    EventFd(..)
+  , eventfd
   , efdCloexec
-  , efdNonblock
+  , efdSemaphore
   , eventfdRead
   , eventfdWrite
-  -- * additional wrappers
-  , EventFD
-  -- ** semaphore like eventfd
-  , eventfdSem
-  , eventfdUp
-  , eventfdUpMany
-  , eventfdDown
-  -- ** barrier like eventfd
+  , eventfdClose
   ) where
+
+import Control.Applicative
+
+import Data.Bits
+import Data.Word
+
+import GHC.Conc
 
 import System.Posix.Eventfd.FFI.Eventfd 
 import System.Posix.Types
 import System.Posix.IO.ByteString
-import Data.Bits
-import Data.Word
-import Data.Binary
 import Foreign
 import Foreign.C.Types
 import Foreign.C.Error
 
 
--- | creates an "eventfd object" file descriptor
---   possible flags:
+-- | Fd wrapper
+newtype EventFd = EventFd { unEventFd :: Fd }
+
+--  | creates  an "eventfd object" that can be used as an event
+--  wait/notify mechanism by user-space applications, and by the  kernel
+--  to notify user-space applications of events.  The object contains an
+--  unsigned 64-bit integer (uint64_t) counter that is maintained by the
+--  kernel.  This counter is initialized with the value specified in the
+--  argument initval.
 --
---     * EFD_CLOEXEC read FD_CLOEXEC
+--  The following values may be bitwise ORed in flags to change the  be-
+--  haviour of eventfd():
 --
---     * EFD_NONBLOCK - set O_NONBLOCK file status fag on a
---       new open file description. 
+--     * efdCloexec - read FD_CLOEXEC
 --
-eventfd :: CUInt              -- initial value
-        -> CInt               -- flags
-        -> IO Fd
-eventfd w f = fmap fromIntegral (throwErrnoIfMinus1 "eventfd" $! c_eventfd w f)
+--     * efdSemaphore - provide  semaphore-like semantics for reads from 
+--        the new file descriptor.  See below.
+--
+--  N.B. eventfd is always non-blocking as it couples with haskell RTS.
+eventfd :: CUInt              -- ^ initial value
+        -> [EFDFlag]          -- ^ flags
+        -> IO EventFd
+eventfd w f = EventFd . fromIntegral <$> (throwErrnoIfMinus1 "eventfd" $! c_eventfd w (efdFlags (efdNonblock:f)))
 
--- | each successful read returns 'Word64'. 
--- Semantics:
---  * if EFD_SEMAPHORE is not specified and counter as a nonzero value
---  then read returns 8 bytes containing that value, and the counter's
---  value is reset to zero
---  * EFD_SEMAPHORE is set and eventfd has nonzero value -> return 1
---  and counter is decremented by 1
---  * EFD_SEMAPHORE is zero then call either blocks (TODO) until counter
---  becomes nonzero or fails with EAGAIN if it was nonblocking
-eventfdRead :: Fd -> IO Word64
-eventfdRead f = alloca $ \x -> fdReadBuf f (castPtr x) (fromIntegral 8) >> peek x
-
--- | write call adds 8-byte integer value to the counter. 
--- if addition would cause the counter's value to exceed maximum then 
--- write either blocks until a read is performed on file descriptor or
--- fails with the read EAGAIN if it was nonblocking
-eventfdWrite :: Fd -> Word64 -> IO CSize 
-eventfdWrite fd w = with w (\x -> fdWriteBuf fd (castPtr x) 8)
-
--- EventFD data
-data EventFD a = EventFD Fd
-
--- phantom types to describe data and semaphore eventfd
-data Sem
-data Dat
+-- | When the file descriptor is no longer required it  should  be
+-- closed.   When  all file descriptors associated with the same
+-- eventfd object have been closed, the resources for object are
+-- freed by the kernel.
+eventfdClose :: EventFd -> IO ()
+eventfdClose = (closeFdWith closeFd) . unEventFd
 
 
--- | Open semaphore live eventfd
-eventfdSem :: CUInt -> [EFDFlag] -> IO (EventFD Sem)
-eventfdSem w fs = fmap EventFD (eventfd w (concatFlags (efdSemaphore:fs)))
+-- | Each successful 'eventfdRead' returns an 8-byte integer.  
+--
+-- The semantics  of 'eventfdRead'  depend  on  whether  the  eventfd
+-- counter  currently  has  a  nonzero  value  and  whether  the
+-- @efdSemaphore@ flag was specified when  creating  the  eventfd
+-- file descriptor:
+--
+--   *  If 'efdSemaphore' was not specified and the eventfd counter
+--      has a nonzero value, then a 'eventfdRead' returns 8 bytes  containing
+--      that  value,  and the counter`s value is reset to zero.
+--
+--   *  If 'efdSemaphore' was specified and the eventfd counter has
+--      a nonzero value, then a 'eventfdRead' returns 8 bytes containing
+--      the value 1, and the counter's value is decremented by 1.
+--
+-- throws IOError if eventfd is closed while waiting for read.
+eventfdRead :: EventFd -> IO Word64
+eventfdRead f = threadWaitRead f' >> alloca (\x -> fdReadBuf f' (castPtr x) 8 >> peek x)
+  where f' = unEventFd f
 
--- | Open data eventfd
-eventfdDat :: CUInt -> [EFDFlag] -> IO (EventFD Dat)
-eventfdDat w fs = fmap EventFD (eventfd w (concatFlags fs))
+-- | A 'eventfdWrite' call adds the 8-byte integer value
+-- The maximum value that may be stored in the counter is the 
+-- largest unsigned 64-bit value  minus  1
+-- (i.e.,  0xfffffffffffffffe).  If the addition would cause the
+-- counter's value to exceed the maximum, then  the 'eventfdWrite'
+-- either blocks until a 'eventfdRead' is  performed or eventfd
+-- handle is closed.
+--
+-- throws IOError if eventfd is closed while waiting for read.
+eventfdWrite :: EventFd -> Word64 -> IO CSize 
+eventfdWrite fd w = threadWaitWrite f' >> with w (\x -> fdWriteBuf f' (castPtr x) 8)
+  where f' = unEventFd fd
 
+-- Convert list of flags to CInt
+efdFlags :: [EFDFlag] -> CInt
+efdFlags fs = foldr (.|.) 0 $! map unEFDFlag fs
 
-eventfdUp :: (EventFD Sem) -> IO ()
-eventfdUp (EventFD fd) = eventfdWrite fd 1 >> return ()
- 
-eventfdUpMany :: (EventFD Sem) -> Int -> IO ()
-eventfdUpMany (EventFD fd) n = eventfdWrite fd (fromIntegral n) >> return ()
-
--- | read eventfd if event fd has 
--- |  * nonzero value -> return 1 and counter decremented by 1
--- |  * zero value -> either blocks until a counter becomes nonzero or fails
-eventfdDown :: (EventFD Sem) -> IO ()
-eventfdDown (EventFD fd) = eventfdRead fd >> return ()
-
-
-concatFlags :: [EFDFlag] -> CInt
-concatFlags xs = foldr (.|.) 0 $ map unEFDFlag xs
