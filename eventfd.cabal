@@ -14,7 +14,7 @@ stability:           experimental
 
 library
   exposed-modules:     System.Posix.Eventfd, System.Posix.Eventfd.FFI.Eventfd
-  build-depends:       base ==4.6.*, unix ==2.6.*, binary ==0.5.*
+  build-depends:       base >=4.0 && <5.0, unix >=2.5 && <2.6, binary ==0.5.*
   build-tools:         hsc2hs
   ghc-options: -Wall
 
