@@ -1,0 +1,7 @@
+language: "haskell"
+install:
+      - "cabal update --verbose=2"
+      - "cabal configure --enable-tests"
+      - "cabal install"
+notifications:
+    email: true
