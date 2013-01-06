@@ -11,7 +11,6 @@ category:            System
 build-type:          Simple
 cabal-version:       >=1.8
 stability:           experimental
-portability:         unportable (posix, ghc, linux>=2.6.30)
 
 library
   exposed-modules:     System.Posix.Eventfd, System.Posix.Eventfd.FFI.Eventfd
