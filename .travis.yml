@@ -1,7 +1,5 @@
 language: "haskell"
 install:
-      - "cabal update --verbose=2"
-      - "cabal install --only-dependencies"
       - "cabal install HUnit async hspec"
       - "cabal configure --enable-tests"
       - "cabal build"
