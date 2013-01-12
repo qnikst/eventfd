@@ -33,6 +33,7 @@ import Control.Applicative
 
 import Data.Bits
 import Data.Word
+import Data.List
 
 import GHC.Conc
 
@@ -66,7 +67,8 @@ newtype EventFd = EventFd { unEventFd :: Fd }
 eventfd :: CUInt              -- ^ initial value
         -> [EFDFlag]          -- ^ flags
         -> IO EventFd
-eventfd w f = EventFd . fromIntegral <$> (throwErrnoIfMinus1 "eventfd" $! c_eventfd w (efdFlags (efdNonblock:f)))
+eventfd w f = EventFd . fromIntegral <$> 
+  (throwErrnoIfMinus1 "eventfd" $! c_eventfd w (efdFlags (efdNonblock:f)))
 
 -- | When the file descriptor is no longer required it  should  be
 -- closed.   When  all file descriptors associated with the same
@@ -93,7 +95,8 @@ eventfdClose = (closeFdWith closeFd) . unEventFd
 --
 -- throws IOError if eventfd is closed while waiting for read.
 eventfdRead :: EventFd -> IO Word64
-eventfdRead f = threadWaitRead f' >> alloca (\x -> fdReadBuf f' (castPtr x) 8 >> peek x)
+eventfdRead f = threadWaitRead f' >> 
+    alloca (\x -> fdReadBuf f' (castPtr x) 8 >> peek x)
   where f' = unEventFd f
 
 -- | A 'eventfdWrite' call adds the 8-byte integer value
@@ -106,10 +109,11 @@ eventfdRead f = threadWaitRead f' >> alloca (\x -> fdReadBuf f' (castPtr x) 8 >>
 --
 -- throws IOError if eventfd is closed while waiting for read.
 eventfdWrite :: EventFd -> Word64 -> IO CSize 
-eventfdWrite fd w = threadWaitWrite f' >> with w (\x -> fdWriteBuf f' (castPtr x) 8)
+eventfdWrite fd w = threadWaitWrite f' >> 
+    with w (\x -> fdWriteBuf f' (castPtr x) 8)
   where f' = unEventFd fd
 
 -- Convert list of flags to CInt
 efdFlags :: [EFDFlag] -> CInt
-efdFlags fs = foldr (.|.) 0 $! map unEFDFlag fs
+efdFlags fs = foldl' (.|.) 0 $! map unEFDFlag fs
 
